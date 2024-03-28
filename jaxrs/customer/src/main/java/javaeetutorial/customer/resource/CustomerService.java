@@ -3,11 +3,13 @@
  *
  * You may not modify, use, reproduce, or distribute this software except in
  * compliance with  the terms of the License at:
- * https://github.com/javaee/tutorial-examples/LICENSE.txt
+ * https://github.com/brieweb/tutorial-examples/LICENSE.txt
+ *
  */
 package javaeetutorial.customer.resource;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +30,7 @@ import javax.ws.rs.core.Response;
  * Customer Restful Service with CRUD methods
  *
  * @author markito 
+ * @author Brian E. Lavender
  */
 @Stateless
 @Path("/Customer")
@@ -46,7 +49,7 @@ public class CustomerService {
     
     @GET
     @Path("all")
-    @Produces({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})
+    @Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML})
     public List<Customer> getAllCustomers() {
         List<Customer> customers = null;
         try {
@@ -69,7 +72,7 @@ public class CustomerService {
      */
     @GET
     @Path("{id}")
-    @Produces({MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON})
+    @Produces({MediaType.APPLICATION_JSON, MediaType.APPLICATION_XML })
     public Customer getCustomer(@PathParam("id") String customerId) {
         Customer customer = null;
 
@@ -127,7 +130,8 @@ public class CustomerService {
                 // return a not found in http/web format
                 throw new WebApplicationException(Response.Status.NOT_FOUND);
             } else {
-                persist(customer);
+                mergeCustomer(oldCustomer,customer);
+                persist(oldCustomer);
                 return Response.ok().status(303).build(); //return a seeOther code
             }
         } catch (WebApplicationException e) {
@@ -153,6 +157,14 @@ public class CustomerService {
                     "Error calling deleteCustomer() for customerId {0}. {1}",
                     new Object[]{customerId, ex.getMessage()});
         }
+    }
+    
+    private void mergeCustomer(Customer oldCustomer, Customer customer) {
+        Address oldAddress = oldCustomer.getAddress();
+        Address address = customer.getAddress();
+        merge(oldAddress,address);
+        merge(oldCustomer,customer);
+        
     }
 
     /**
@@ -183,8 +195,9 @@ public class CustomerService {
      */
     private Customer findById(String customerId) {
         Customer customer = null;
+        Integer cusId = Integer.valueOf(customerId);
         try {
-            customer = em.find(Customer.class, customerId);
+            customer = em.find(Customer.class, cusId);
             return customer;
         } catch (Exception ex) {
             logger.log(Level.WARNING, 
@@ -196,7 +209,7 @@ public class CustomerService {
     private List<Customer> findAllCustomers() {
         List<Customer> customers = new ArrayList<>();
         try {
-            customers = (List<Customer>) em.createNamedQuery("findAllCustomers").getResultList();
+            customers =  em.createNamedQuery("findAllCustomers").getResultList();
         } catch (Exception ex) {
             logger.log(Level.WARNING, "Error when finding all customers");
         }
@@ -212,15 +225,51 @@ public class CustomerService {
      */
     private boolean remove(String customerId) {
         Customer customer;
+        Integer cusId = Integer.valueOf(customerId);
         try {
-            customer = em.find(Customer.class, customerId);
+            customer = em.find(Customer.class, cusId);
             Address address = customer.getAddress();
             em.remove(address);
             em.remove(customer);
+            logger.log(Level.INFO, "Removed customer with ID {0}", customerId);
             return true;
         } catch (Exception ex) {
             logger.log(Level.WARNING, "Couldn't remove customer with ID {0}", customerId);
             return false;
         }
     }
+    
+    public void merge(Object obj, Object update){
+        if(!obj.getClass().isAssignableFrom(update.getClass())){
+            return;
+        }
+
+        Method[] methods = obj.getClass().getMethods();
+        for(Method fromMethod: methods){
+            logger.log(Level.INFO, "Method " + fromMethod.getName());
+        }
+        for(Method fromMethod: methods){
+            if (fromMethod.getName().equals("getId"))
+                continue;
+            if (fromMethod.getName().equals("getAddress"))
+                continue;
+            if(fromMethod.getDeclaringClass().equals(obj.getClass())
+                    && fromMethod.getName().startsWith("get")){
+
+                String fromName = fromMethod.getName();
+                String toName = fromName.replace("get", "set");
+
+                try {
+                    Method toMetod = obj.getClass().getMethod(toName, fromMethod.getReturnType());
+                    Object value = fromMethod.invoke(update, (Object[])null);
+                    if(value != null){
+                        toMetod.invoke(obj, value);
+                    }
+                } catch (Exception e) {
+                    logger.log(Level.SEVERE, "Unable to Merge");
+                } 
+            }
+        }
+    }
+    
 }
